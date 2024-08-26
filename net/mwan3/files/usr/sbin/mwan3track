@@ -198,11 +198,24 @@ update_status() {
 	echo "$4" > $MWAN3TRACK_STATUS_DIR/$INTERFACE/LOSS_${track_ip}
 }
 
+get_other_iface() {
+	iface_state_list="/var/run/mwan3/iface_state"
+	for item in $iface_state_list/*; do
+		if [ "$(basename "$item")" != "$1" ]; then
+			other_iface=$(basename $item)
+		fi
+	done
+	echo $other_iface
+}
+
 main() {
 	local reliability count timeout interval failure_interval
 	local recovery_interval down up size
 	local keep_failure_interval check_quality failure_latency
 	local recovery_latency failure_loss recovery_loss
+	local track_interface_status failure_latency_relaxed recovery_latency_relaxed
+	local failure_latency_strict recovery_latency_strict failure_loss_relaxed
+	local recovery_loss_relaxed failure_loss_strict recovery_loss_strict
 
 	local max_ttl httping_ssl track_ips do_log
 
@@ -247,6 +260,15 @@ main() {
 	config_get recovery_latency $INTERFACE recovery_latency 500
 	config_get failure_loss $INTERFACE failure_loss 40
 	config_get recovery_loss $INTERFACE recovery_loss 10
+	config_get track_interface_status $INTERFACE track_interface_status 0
+	config_get failure_latency_relaxed $INTERFACE failure_latency_relaxed 2000
+	config_get recovery_latency_relaxed $INTERFACE recovery_latency_relaxed 1000
+	config_get failure_latency_strict $INTERFACE failure_latency_strict 1000
+	config_get recovery_latency_strict $INTERFACE recovery_latency_strict 500
+	config_get failure_loss_relaxed $INTERFACE failure_loss_relaxed 75
+	config_get recovery_loss_relaxed $INTERFACE recovery_loss_relaxed 50
+	config_get failure_loss_strict $INTERFACE failure_loss_strict 40
+	config_get recovery_loss_strict $INTERFACE recovery_loss_strict 10
 	local sleep_time result ping_status loss latency
 	mwan3_list_track_ips()
 	{
@@ -344,20 +366,56 @@ main() {
 					[ -n "$do_log" ] && LOG info "Check ($track_method) ${do_log} for target \"$track_ip\" on interface $INTERFACE ($DEVICE). Current score: $score"
 
 				else
-					if [ "$loss" -ge "$failure_loss" ] || [ "$latency" -ge "$failure_latency" ]; then
-						let lost++
-						update_status "$track_ip" "down" $latency $loss
+					if [ $track_interface_status -eq 0 ]; then
+						if [ "$loss" -ge "$failure_loss" ] || [ "$latency" -ge "$failure_latency" ]; then
+							let lost++
+							update_status "$track_ip" "down" $latency $loss
 
-						[ $score -gt $up ] && do_log="failed"
-					elif [ "$loss" -le "$recovery_loss" ] && [ "$latency" -le "$recovery_latency" ]; then
-						let host_up_count++
-						update_status "$track_ip" "up" $latency $loss
+							[ $score -gt $up ] && do_log="failed"
+						elif [ "$loss" -le "$recovery_loss" ] && [ "$latency" -le "$recovery_latency" ]; then
+							let host_up_count++
+							update_status "$track_ip" "up" $latency $loss
 
-						[ $score -le $up ] && do_log="success"
+							[ $score -le $up ] && do_log="success"
+						else
+							echo "skipped" > $MWAN3TRACK_STATUS_DIR/$INTERFACE/TRACK_${track_ip}
+						fi
+						[ -n "$do_log" ] && LOG info "Check (${track_method}: latency=${latency}ms loss=${loss}%) ${do_log} for target \"$track_ip\" on interface $INTERFACE ($DEVICE). Current score: $score"
 					else
-						echo "skipped" > $MWAN3TRACK_STATUS_DIR/$INTERFACE/TRACK_${track_ip}
+						OTHER_INTERFACE=$(get_other_iface $INTERFACE)
+						OTHER_INTERFACE_STATUS=$(cat $MWAN3TRACK_STATUS_DIR/$OTHER_INTERFACE/STATUS)
+						if [ $OTHER_INTERFACE_STATUS == "online" ]; then
+							if [ "$loss" -ge "$failure_loss_strict" ] || [ "$latency" -ge "$failure_latency_strict" ]; then
+								let lost++
+								update_status "$track_ip" "down" $latency $loss
+
+								[ $score -gt $up ] && do_log="failed"
+							elif [ "$loss" -le "$recovery_loss_strict" ] && [ "$latency" -le "$recovery_latency_strict" ]; then
+								let host_up_count++
+								update_status "$track_ip" "up" $latency $loss
+
+								[ $score -le $up ] && do_log="success"
+							else
+								echo "skipped" > $MWAN3TRACK_STATUS_DIR/$INTERFACE/TRACK_${track_ip}
+							fi
+							[ -n "$do_log" ] && LOG info "Strict Mode Check (${track_method}: latency=${latency}ms loss=${loss}%) ${do_log} for target \"$track_ip\" on interface $INTERFACE ($DEVICE). Other interface $OTHER_INTERFACE status is $OTHER_INTERFACE_STATUS. Current score: $score"
+						else
+							if [ "$loss" -ge "$failure_loss_relaxed" ] || [ "$latency" -ge "$failure_latency_relaxed" ]; then
+								let lost++
+								update_status "$track_ip" "down" $latency $loss
+
+								[ $score -gt $up ] && do_log="failed"
+							elif [ "$loss" -le "$recovery_loss_relaxed" ] && [ "$latency" -le "$recovery_latency_relaxed" ]; then
+								let host_up_count++
+								update_status "$track_ip" "up" $latency $loss
+
+								[ $score -le $up ] && do_log="success"
+							else
+								echo "skipped" > $MWAN3TRACK_STATUS_DIR/$INTERFACE/$TRACK_${track_ip}
+							fi
+							[ -n "$do_log" ] && LOG info "Relaxed Mode Check (${track_method}: latency=${latency}ms loss=${loss}%) ${do_log} for target \"$track_ip\" on interface $INTERFACE ($DEVICE). Ohter interface $OTHER_INTERFACE status is $OTHER_INTERFACE_STATUS. Current score: $score"
+						fi
 					fi
-					[ -n "$do_log" ] && LOG info "Check (${track_method}: latency=${latency}ms loss=${loss}%) ${do_log} for target \"$track_ip\" on interface $INTERFACE ($DEVICE). Current score: $score"
 				fi
 			else
 				echo "skipped" > $MWAN3TRACK_STATUS_DIR/$INTERFACE/TRACK_${track_ip}

@@ -385,6 +385,7 @@ main() {
 						OTHER_INTERFACE=$(get_other_iface $INTERFACE)
 						OTHER_INTERFACE_STATUS=$(cat $MWAN3TRACK_STATUS_DIR/$OTHER_INTERFACE/STATUS)
 						if [ $OTHER_INTERFACE_STATUS == "online" ]; then
+							echo "strict" > "$MWAN3TRACK_STATUS_DIR/$INTERFACE/CHECK_MODE"
 							if [ "$loss" -ge "$failure_loss_strict" ] || [ "$latency" -ge "$failure_latency_strict" ]; then
 								let lost++
 								update_status "$track_ip" "down" $latency $loss
@@ -400,6 +401,7 @@ main() {
 							fi
 							[ -n "$do_log" ] && LOG info "Strict Mode Check (${track_method}: latency=${latency}ms loss=${loss}%) ${do_log} for target \"$track_ip\" on interface $INTERFACE ($DEVICE). Other interface $OTHER_INTERFACE status is $OTHER_INTERFACE_STATUS. Current score: $score"
 						else
+							echo "relaxed" > "$MWAN3TRACK_STATUS_DIR/$INTERFACE/CHECK_MODE"
 							if [ "$loss" -ge "$failure_loss_relaxed" ] || [ "$latency" -ge "$failure_latency_relaxed" ]; then
 								let lost++
 								update_status "$track_ip" "down" $latency $loss

@@ -427,12 +427,14 @@ main() {
 		if [ $host_up_count -lt $reliability ]; then
 			let score--
 
-			if [ $score -le 0 ]; then
+			if [ $score -lt $up ]; then
 				score=0
+				[ ${keep_failure_interval} -eq 1 ] && sleep_time=$failure_interval
+			elif [ $score -eq $up ]; then
 				disconnecting
 				sleep_time=$failure_interval
 				disconnected
-			else
+			elif [ $score -gt $up ]; then
 				sleep_time=$failure_interval
 			fi
 		else
@@ -444,7 +446,6 @@ main() {
 			lost=0
 
 			if [ $score -lt $up ]; then
-				connecting
 				sleep_time=$recovery_interval
 			elif [ $score -eq $up ]; then
 				connecting
